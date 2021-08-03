@@ -38,23 +38,33 @@
     </v-app-bar>
 
     <v-main>
-      <HelloWorld/>
+      <work-sheet :table="Sheet" :config="Config">
+      </work-sheet>
+
     </v-main>
   </v-app>
 </template>
 
 <script>
-import HelloWorld from './components/HelloWorld';
+// import HelloWorld from './components/HelloWorld';
+import TableView from "./components/Table.vue";
+import Table from "./utils/Table";
+import Intl from "./utils/Intl";
 
 export default {
   name: 'App',
 
   components: {
-    HelloWorld,
+    WorkSheet: TableView
+  },
+  props: {
+    Sheet: Table.Table,
+    Config: Intl.Config,
+  },
+  created: function() {
+    console.log(this);
   },
 
-  data: () => ({
-    //
-  }),
+  data: () => ({}),
 };
 </script>
