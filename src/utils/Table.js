@@ -1,23 +1,89 @@
-// import Vue from "vue";
-
 const DAYDIFF = 24 * 60 * 60 * 1000;
+import Intl from "./Intl";
+import Record from "./Record";
 
 class Table {
     /**
      * 
      * @param {String} name name of the table
      * @param {Unit[]} words A list of words
+     * @param {Record.Record[]} records a list of records
      * @param {Integer} showLast history record query length
      */
-    constructor(name, words=[], showLast=5) {
+    constructor(name, words=[], records=[], showLast=5) {
         this.name = name;
         this.words = words;
+        this.records = records;
         this.showLast = showLast;
+        this.mode = Intl.Mode.edit;
+        this.last = this.records.pop();
+    }
+
+    performHighlight(defaultColor="blue") {
+        this.words.forEach(word => {
+            if (this.last.contains(word)) {
+                if (!this.last.query(word)) {
+                    word.highlight = defaultColor;
+                }
+            }
+        });
+    }
+
+    clearHighlight(unit) {
+        unit.resetHighlight();
+    }
+
+    clearAllHighlights() {
+        this.words.forEach(unit => unit.resetHighlight());
+    }
+
+    storeLast(lastrec) {
+        this.last = lastrec;
+    }
+
+    initiateRecord() {
+        if (this.last) this.records.push(this.last);
+        this.last = new Record.Record(new Date());
+    }
+
+    discardLast() {
+        this.last = this.records.pop();
+    }
+
+    recordCorrect(unit) {
+        this.last.insertCorrect(unit);
+    }
+
+    recordWrong(unit) {
+        this.last.insertWrong(unit);
+    }
+
+    deleteRecord(unit) {
+        this.last.deleteUnit(unit);
+    }
+
+    queryRecord(unit) {
+        if (this.last) {
+            return this.last.query(unit);
+        } else {
+            return undefined;
+        }
     }
 
     get dates() {
-        return Array.sort(this.words.reduce((accu, curr) => 
-            accu.concat(curr.dates.filter(x => accu.indexOf(x) < 0)), []));
+        return this.records
+            .map(curr => new Date(curr.dt.getFullYear(), curr.dt.getMonth(), curr.dt.getDay()) - 0)
+            .reduce((accu, curr) => {
+                if (!accu.includes(curr)) {
+                    accu.push(curr);
+                }
+            }, []);
+        // return Array.sort(this.words.reduce((accu, curr) => 
+        //     accu.concat(curr.dates.filter(x => accu.indexOf(x) < 0)), []));
+    }
+
+    contains(word) {
+        return this.words.filter(unit => unit.spelling == word).length != 0;
     }
 
     insert(word) {
@@ -37,8 +103,30 @@ class Table {
     /**
      * returns a list of each unit's stats
      */
-    get records() {
-        return this.words.map(x => x.stats(this.showLast));
+    get statistics() {
+        return this.words.map(x => {
+            x.reset();
+            this.records.forEach(rec => {
+                if (rec.contains(x)) {
+                    x.add(rec.date, rec.query(x));
+                }
+            });
+            let lastStatus = undefined;
+            if (this.last.contains(x)) {
+                x.add(this.last.date, this.last.query(x));
+            }
+
+            if (this.mode != Intl.Mode.dictation && this.last.contains(x)) {
+                lastStatus = this.last.query(x);
+            } else if (this.mode == Intl.Mode.dictation && this.records.length > 0) {
+                if (this.records[this.records.length - 1].contains(x)) {
+                    lastStatus = this.records[this.records.length - 1].query(x);
+                }
+            }
+            let out = x.stats(this.showLast);
+            out.lastRecord = lastStatus;
+            return out;
+        });
     }
 
     zip() {
@@ -85,10 +173,19 @@ class Unit {
          */
         this.records = records;
         this.annot = annot;
+        this.editing = false;
     }
 
     zip() {
         return [this.spelling, this.highlight, this.records, this.annot];
+    }
+
+    reset() {
+        this.records = {};
+    }
+
+    resetHighlight() {
+        this.highlight = "white";
     }
 
     /**
@@ -97,7 +194,7 @@ class Unit {
      * @param {Boolean} correct 
      */
     add(date, correct) {
-        let entry = (new Date(date.getFullYear(), date.getMonth(), date.getDate()) - 0) + "";
+        let entry = date - 0;
         if (!this.records[entry]) {
             this.records[entry] = {wrong: 0, correct: 0};
         }
@@ -105,7 +202,7 @@ class Unit {
     }
 
     delete(date, correct) {
-        let entry = (new Date(date.getFullYear(), date.getMonth(), date.getDate()) - 0) + "";
+        let entry = date - 0;
         if (this.records[entry]) {
             this.records[entry][correct?"correct":"wrong"] -= 1;
         }
@@ -116,13 +213,29 @@ class Unit {
         }
     }
 
-    query(date) {
-        let entry = (new Date(date.getFullYear(), date.getMonth(), date.getDate()) - 0) + "";
-        return this.records[entry];
+    query(start, end) {
+        start = start - 0;
+        end = end - 0;
+        let counter = {correct: 0, wrong: 0};
+        Object.keys(this.records).forEach(x => {
+            let converted = parseInt(x);
+            if (converted >= start && converted < end) {
+                counter.correct += this.records[x].correct;
+                counter.wrong += this.records[x].wrong;
+            }
+        })
+        return counter;
     }
 
     get dates() {
-        return Object.keys(this.records).map(x => new Date(parseInt(x)));
+        let out = [];
+        Object.keys(this.records).forEach(x => {
+            let converted = new Date(parseInt(x));
+            converted = new Date(converted.getFullYear(), converted.getMonth(), converted.getDay());
+            if (out.filter(k => k == converted - 0).length == 0) out.push(converted);
+        });
+        return out;
+        // return Object.keys(this.records).map(x => new Date(parseInt(x)));
     }
 
     /**
@@ -137,12 +250,13 @@ class Unit {
      */
     stats(history=5) {
         let now = new Date();
+        let startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         let diff = history * DAYDIFF;
-        let historyStatistics = new Date(now - diff);
+        let historyStatistics = new Date(startToday - diff);
 
-        let yesterday = new Date(now - DAYDIFF);
-        let yesterdayRecord = this.query(yesterday);
-        let today = this.query(now);
+        let yesterday = new Date(startToday - DAYDIFF);
+        let yesterdayRecord = this.query(yesterday, startToday);
+        let today = this.query(startToday, now);
 
         let out = {
             history: {correct: 0, wrong: 0},

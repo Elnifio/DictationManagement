@@ -13,6 +13,15 @@ let sheet = new Table.Table("三年级上册");
 sheet.insert("01");
 sheet.insert("02");
 sheet.insert("03");
+let i = 0;
+while (i < 30) {
+  sheet.insert(`${i}-word`);
+  i += 1;
+}
+sheet.initiateRecord();
+sheet.recordCorrect(sheet.words[0]);
+sheet.recordCorrect(sheet.words[0]);
+sheet.recordCorrect(sheet.words[0]);
 
 new Vue({
   vuetify,
